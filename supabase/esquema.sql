@@ -31,6 +31,7 @@ create policy "equipo lee" on public.documentos for select to authenticated usin
 create policy "equipo agrega" on public.documentos for insert to authenticated with check (true);
 create policy "equipo modifica" on public.documentos for update to authenticated using (true) with check (true);
 revoke all on public.documentos from anon;
+grant select, insert, update on public.documentos to authenticated;
 
 -- Numeración compartida (cotizaciones, clientes, repuestos)
 create table if not exists public.contadores (
