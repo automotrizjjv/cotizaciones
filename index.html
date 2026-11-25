@@ -178,6 +178,8 @@ input[type='checkbox'] { width: 20px; height: 20px; min-height: 0; accent-color:
   }
   .lateral .marca { display: flex; align-items: center; gap: 0.65rem; color: #fff; text-decoration: none; padding: 0.3rem 0.5rem 1.2rem; font-weight: 800; }
   .lateral .marca small { display: block; font-weight: 500; color: var(--celeste-2); font-size: 0.72rem; letter-spacing: 0.4px; }
+  .lateral .marca:has(.marca-logo-mini.base) { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+  .lateral .marca-logo-mini.base { height: 40px; max-width: 160px; }
   .lateral nav { display: flex; flex-direction: column; gap: 0.2rem; }
   .lateral nav a {
     display: flex; align-items: center; gap: 0.7rem; padding: 0.7rem 0.8rem; border-radius: 10px; color: #c9def0; text-decoration: none; font-weight: 600;
