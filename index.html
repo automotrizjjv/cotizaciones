@@ -690,7 +690,7 @@ html.con-sesion .superior [data-salir], html.con-sesion .pie-lateral [data-salir
     });
   const errNube = (e) => (e && e.message ? e.message : String(e));
 
-  function pantallaAcceso({ mensaje = '', error = '', soloMensaje = false } = {}) {
+  function pantallaAcceso({ mensaje = '', error = '', soloMensaje = false, registro = false } = {}) {
     let el = document.getElementById('accesoNube');
     if (!el) {
       el = document.createElement('div');
@@ -700,12 +700,14 @@ html.con-sesion .superior [data-salir], html.con-sesion .pie-lateral [data-salir
     const logo = Demo.logoBase ? `<img src="${Demo.logoBase}" alt="AUTOMOTRIZ JJV" style="height:46px;margin:0 auto .4rem;display:block">` : '<div class="acceso-marca">AUTOMOTRIZ JJV</div>';
     el.innerHTML = `<div class="acceso-caja">${logo}<h1>Sistema de Cotizaciones</h1>
       ${soloMensaje ? `<p class="acceso-msg">${mensaje}</p><button class="btn btn-primario btn-bloque" onclick="location.reload()">Reintentar</button>` : `
-      <form id="formAcceso" novalidate>
+      <form id="formAcceso" data-modo="${registro ? 'registro' : 'ingreso'}" novalidate>
+        ${registro ? '<p class="small muted" style="margin:0">Primera vez: use el correo que el administrador autorizó y elija su contraseña.</p>' : ''}
         <div class="campo"><label for="accEmail">Correo</label><input id="accEmail" type="email" autocomplete="username" required></div>
-        <div class="campo"><label for="accPass">Contraseña</label><input id="accPass" type="password" autocomplete="current-password" required></div>
+        <div class="campo"><label for="accPass">${registro ? 'Elija una contraseña (mínimo 8 caracteres)' : 'Contraseña'}</label><input id="accPass" type="password" autocomplete="${registro ? 'new-password' : 'current-password'}" required></div>
+        ${registro ? '<div class="campo"><label for="accPass2">Repita la contraseña</label><input id="accPass2" type="password" autocomplete="new-password" required></div>' : ''}
         <p class="acceso-error" ${error ? '' : 'hidden'}>${error}</p>
-        <button class="btn btn-primario btn-grande btn-bloque" type="submit">Ingresar</button>
-        <p class="small muted" style="text-align:center;margin:.8rem 0 0">Pida su usuario al administrador.</p>
+        <button class="btn btn-primario btn-grande btn-bloque" type="submit">${registro ? 'Crear mi cuenta' : 'Ingresar'}</button>
+        <p class="small" style="text-align:center;margin:.8rem 0 0"><a href="#" data-cambiar-modo>${registro ? 'Ya tengo cuenta: ingresar' : '¿Primera vez? Crear mi contraseña'}</a></p>
       </form>`}</div>`;
     return el;
   }
@@ -718,20 +720,40 @@ html.con-sesion .superior [data-salir], html.con-sesion .pie-lateral [data-salir
     if (!sesion) {
       sesion = await new Promise((resolver) => {
         const el = pantallaAcceso();
+        el.addEventListener('click', (ev) => {
+          if (!ev.target.closest('[data-cambiar-modo]')) return;
+          ev.preventDefault();
+          const email = el.querySelector('#accEmail').value;
+          pantallaAcceso({ registro: el.querySelector('#formAcceso').dataset.modo !== 'registro' });
+          el.querySelector('#accEmail').value = email;
+        });
         el.addEventListener('submit', async (ev) => {
           ev.preventDefault();
+          const form = el.querySelector('#formAcceso');
+          const registro = form.dataset.modo === 'registro';
           const boton = el.querySelector('button[type=submit]');
           const email = el.querySelector('#accEmail').value.trim();
           const pass = el.querySelector('#accPass').value;
           const err = el.querySelector('.acceso-error');
+          const mostrar = (t) => ((err.hidden = false), (err.textContent = t));
+          if (!email || !pass) return mostrar('Escriba su correo y su contraseña.');
+          if (registro && pass.length < 8) return mostrar('La contraseña debe tener al menos 8 caracteres.');
+          if (registro && pass !== el.querySelector('#accPass2').value) return mostrar('Las contraseñas no coinciden.');
           boton.disabled = true;
-          const r = await Nube.cliente.auth.signInWithPassword({ email, password: pass }).catch((e) => ({ error: e }));
+          const r = await (registro
+            ? Nube.cliente.auth.signUp({ email, password: pass })
+            : Nube.cliente.auth.signInWithPassword({ email, password: pass })
+          ).catch((e) => ({ error: e }));
           boton.disabled = false;
           if (r.error) {
-            err.hidden = false;
-            err.textContent = /invalid/i.test(errNube(r.error)) ? 'Correo o contraseña incorrectos.' : 'No se pudo ingresar: ' + errNube(r.error);
-            return;
+            const m = errNube(r.error);
+            if (/no_autorizado|database error/i.test(m)) return mostrar('Este correo no está autorizado. Pídale al administrador que lo agregue.');
+            if (/already|registered|exists/i.test(m)) return mostrar('Ese correo ya tiene cuenta. Use «Ya tengo cuenta: ingresar».');
+            if (/invalid/i.test(m)) return mostrar('Correo o contraseña incorrectos.');
+            if (/password/i.test(m)) return mostrar('Elija una contraseña más segura (mínimo 8 caracteres, con letras y números).');
+            return mostrar('No se pudo ingresar: ' + m);
           }
+          if (!r.data || !r.data.session) return mostrar('Cuenta creada. Ahora ingrese con su correo y contraseña.');
           resolver(r.data.session);
         });
       });
