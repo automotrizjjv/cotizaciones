@@ -346,6 +346,15 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
 
 :root { color-scheme: light; }
 [data-salir] { display: none !important; }
+html.con-sesion .superior [data-salir], html.con-sesion .pie-lateral [data-salir] { display: inline-flex !important; }
+#accesoNube { position: fixed; inset: 0; z-index: 1000; background: var(--marino); display: grid; place-items: center; padding: 1rem; }
+#accesoNube .acceso-caja { width: 100%; max-width: 380px; background: #fff; border-radius: 16px; padding: 1.6rem 1.4rem; box-shadow: 0 10px 40px rgba(0,0,0,.25); }
+#accesoNube .acceso-caja img { background: var(--marino); border-radius: 10px; padding: 8px 12px; height: 62px !important; }
+#accesoNube h1 { text-align: center; font-size: 1.15rem; margin: .4rem 0 1.1rem; }
+#accesoNube form { display: grid; gap: .8rem; }
+#accesoNube .acceso-error { color: var(--error); font-size: .9rem; margin: 0; }
+#accesoNube .acceso-marca { text-align: center; font-weight: 900; color: var(--marino); font-size: 1.3rem; }
+#accesoNube .acceso-msg { text-align: center; color: var(--texto); }
 .aviso-demo { background: var(--celeste-claro); color: var(--marino-2); font-size: 0.8rem; line-height: 1.35; padding: 0.45rem 0.9rem; text-align: center; border-bottom: 1px solid var(--celeste-medio); }
 
 </style>
@@ -660,11 +669,257 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
   };
   const guardarMeta = () => escribir('meta', 'meta');
 
+  /* ============================ Base compartida (Supabase) ============================
+   * Si NUBE.url y NUBE.clave están completos, todos los equipos comparten los mismos datos.
+   * La clave es la "publishable/anon key" del proyecto: es pública por diseño; los datos
+   * los protege la seguridad por filas (solo usuarios con sesión iniciada).
+   */
+  const NUBE = { url: '', clave: '' };
+  const Nube = (Demo.nube = {
+    activa: false, cliente: null, usuario: null, desde: null, filas: [], firmaMeta: '',
+    pendientes: new Map(), reservas: {},
+    configurada: () => !!(NUBE.url && NUBE.clave),
+  });
+  const cargarScript = (src) =>
+    new Promise((ok, mal) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = ok;
+      s.onerror = () => mal(new Error('No se pudo cargar ' + src));
+      document.head.appendChild(s);
+    });
+  const errNube = (e) => (e && e.message ? e.message : String(e));
+
+  function pantallaAcceso({ mensaje = '', error = '', soloMensaje = false } = {}) {
+    let el = document.getElementById('accesoNube');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'accesoNube';
+      document.body.appendChild(el);
+    }
+    const logo = Demo.logoBase ? `<img src="${Demo.logoBase}" alt="AUTOMOTRIZ JJV" style="height:46px;margin:0 auto .4rem;display:block">` : '<div class="acceso-marca">AUTOMOTRIZ JJV</div>';
+    el.innerHTML = `<div class="acceso-caja">${logo}<h1>Sistema de Cotizaciones</h1>
+      ${soloMensaje ? `<p class="acceso-msg">${mensaje}</p><button class="btn btn-primario btn-bloque" onclick="location.reload()">Reintentar</button>` : `
+      <form id="formAcceso" novalidate>
+        <div class="campo"><label for="accEmail">Correo</label><input id="accEmail" type="email" autocomplete="username" required></div>
+        <div class="campo"><label for="accPass">Contraseña</label><input id="accPass" type="password" autocomplete="current-password" required></div>
+        <p class="acceso-error" ${error ? '' : 'hidden'}>${error}</p>
+        <button class="btn btn-primario btn-grande btn-bloque" type="submit">Ingresar</button>
+        <p class="small muted" style="text-align:center;margin:.8rem 0 0">Pida su usuario al administrador.</p>
+      </form>`}</div>`;
+    return el;
+  }
+
+  Nube.iniciar = async function () {
+    if (!window.supabase) await cargarScript('vendor/supabase-2.119.2.js');
+    Nube.cliente = window.supabase.createClient(NUBE.url, NUBE.clave, { auth: { persistSession: true, autoRefreshToken: true, storageKey: 'jjv-sesion' } });
+    let { data } = await Nube.cliente.auth.getSession();
+    let sesion = data && data.session;
+    if (!sesion) {
+      sesion = await new Promise((resolver) => {
+        const el = pantallaAcceso();
+        el.addEventListener('submit', async (ev) => {
+          ev.preventDefault();
+          const boton = el.querySelector('button[type=submit]');
+          const email = el.querySelector('#accEmail').value.trim();
+          const pass = el.querySelector('#accPass').value;
+          const err = el.querySelector('.acceso-error');
+          boton.disabled = true;
+          const r = await Nube.cliente.auth.signInWithPassword({ email, password: pass }).catch((e) => ({ error: e }));
+          boton.disabled = false;
+          if (r.error) {
+            err.hidden = false;
+            err.textContent = /invalid/i.test(errNube(r.error)) ? 'Correo o contraseña incorrectos.' : 'No se pudo ingresar: ' + errNube(r.error);
+            return;
+          }
+          resolver(r.data.session);
+        });
+      });
+    }
+    const u = sesion.user;
+    const md = u.user_metadata || {};
+    Nube.usuario = { id: u.id, email: u.email, nombre: md.nombre || md.display_name || md.full_name || md.name || String(u.email || '').split('@')[0] };
+    const el = document.getElementById('accesoNube');
+    if (el) el.remove();
+    Nube.filas = await Nube.leer(null);
+    Nube.activa = true;
+    document.documentElement.classList.add('con-sesion');
+  };
+
+  /** Lee todos los documentos (o solo los cambiados desde una fecha), de a 1000 filas. */
+  Nube.leer = async function (desde) {
+    const todas = [];
+    for (let i = 0; ; i += 1000) {
+      let q = Nube.cliente.from('documentos').select('coleccion,id,datos,borrado,actualizado').order('actualizado', { ascending: true }).range(i, i + 999);
+      q = desde ? q.gt('actualizado', desde) : q.eq('borrado', false);
+      const { data, error } = await q;
+      if (error) throw error;
+      todas.push(...data);
+      if (data.length < 1000) break;
+    }
+    for (const f of todas) if (!Nube.desde || f.actualizado > Nube.desde) Nube.desde = f.actualizado;
+    return todas;
+  };
+
+  async function subir(coleccion, id, datos) {
+    const fila = datos ? { coleccion, id, datos, borrado: false } : { coleccion, id, datos: null, borrado: true };
+    const { error } = await Nube.cliente.from('documentos').upsert(fila, { onConflict: 'coleccion,id' });
+    if (error) throw error;
+  }
+  const firmaDe = (m) => {
+    const { contadores, ...resto } = m || {};
+    return JSON.stringify(resto);
+  };
+  /** Objeto con la misma forma que la base de datos de Claude, para reutilizar la carga y el guardado. */
+  Nube.raiz = function () {
+    const docs = (c) => Nube.filas.filter((f) => f.coleccion === c).map((f) => ({ id: f.id, data: () => f.datos }));
+    const conReintento = (c, id, fn) => async (...a) => {
+      try {
+        await fn(...a);
+        Nube.pendientes.delete(c + '/' + id);
+      } catch (e) {
+        Nube.pendientes.set(c + '/' + id, () => fn(...a));
+        if (window.App && !Nube.avisado) {
+          Nube.avisado = true;
+          App.toast('Sin conexión: los cambios se subirán cuando vuelva internet.', 'error');
+        }
+        throw e;
+      }
+    };
+    return {
+      get: async () => {
+        const f = Nube.filas.find((x) => x.coleccion === 'meta' && x.id === 'meta');
+        if (f) Nube.firmaMeta = firmaDe(f.datos);
+        return { exists: !!f, data: () => (f ? f.datos : {}) };
+      },
+      set: async (datos) => {
+        const firma = firmaDe(datos);
+        if (firma === Nube.firmaMeta) return;
+        const { contadores, ...resto } = datos;
+        await conReintento('meta', 'meta', () => subir('meta', 'meta', resto))();
+        Nube.firmaMeta = firma;
+      },
+      collection: (c) => ({
+        get: async () => ({ docs: docs(c) }),
+        doc: (id) => ({
+          set: conReintento(c, id, (datos) => subir(c, String(id), datos)),
+          delete: conReintento(c, id, () => subir(c, String(id), null)),
+        }),
+      }),
+    };
+  };
+
+  /* ---- Numeración compartida: cada equipo reserva números en el servidor ---- */
+  Nube.reservar = async function (nombre, cantidad) {
+    const { data, error } = await Nube.cliente.rpc('reservar', { p_nombre: nombre, p_cantidad: cantidad });
+    if (error) throw error;
+    const fin = Number(data);
+    const r = (Nube.reservas[nombre] = Nube.reservas[nombre] || []);
+    for (let v = fin - cantidad + 1; v <= fin; v++) r.push(v);
+  };
+  Nube.tomar = (nombre) => {
+    const r = Nube.reservas[nombre];
+    return r && r.length ? r.shift() : null;
+  };
+  const maxId = (c) => lista(c).reduce((m, x) => Math.max(m, Number(x.id) || 0), 0);
+  Nube.ajustarContadores = async function () {
+    const pares = { cotizacion: maxId('cotizaciones'), clientes: maxId('clientes'), productos: maxId('productos'), solicitud: maxId('solicitudes') };
+    for (const [k, v] of Object.entries(pares)) E.meta.contadores[k] = Math.max(E.meta.contadores[k] || 0, v);
+    await Promise.all(Object.entries(pares).map(([k, v]) => Nube.cliente.rpc('ajustar_contador', { p_nombre: k, p_minimo: v })));
+  };
+  Nube.prepararReservas = async function (ruta) {
+    const falta = (n, min) => ((Nube.reservas[n] || []).length < min ? min - (Nube.reservas[n] || []).length : 0);
+    const tareas = [];
+    const crea = /^\/api\/admin\/cotizaciones(\/\d+\/duplicar)?$/.test(ruta) || /^\/api\/admin\/solicitudes\/\d+\/cotizar$/.test(ruta);
+    if (crea && falta('cotizacion', 1)) tareas.push(Nube.reservar('cotizacion', 1));
+    if (/^\/api\/publico\/solicitudes$/.test(ruta) && falta('solicitud', 1)) tareas.push(Nube.reservar('solicitud', 1));
+    if (falta('clientes', 2)) tareas.push(Nube.reservar('clientes', 10));
+    const minProd = /productos\/importar$/.test(ruta) ? 5000 : 30;
+    const fp = falta('productos', minProd);
+    if (fp) tareas.push(Nube.reservar('productos', Math.max(fp, 30)));
+    await Promise.all(tareas);
+  };
+
+  /* ---- Cambios hechos en otros equipos ---- */
+  function aplicarFila(f) {
+    if (f.coleccion === 'meta') {
+      if (f.datos && firmaDe(f.datos) !== Nube.firmaMeta) {
+        const { contadores, ...resto } = f.datos;
+        Object.assign(E.meta, resto);
+        E.meta.config = Object.assign({}, CONFIG_INICIAL, E.meta.config || {});
+        Nube.firmaMeta = firmaDe(f.datos);
+      }
+      return;
+    }
+    if (!COLECCIONES.includes(f.coleccion)) return;
+    if (f.coleccion === 'productos' && String(f.id).startsWith('lote-')) {
+      const n = Number(String(f.id).slice(5));
+      for (const [k, p] of E.productos) if (loteDe(p.id) === n) E.productos.delete(k);
+      if (!f.borrado && f.datos) (f.datos.items || []).forEach((p) => E.productos.set(String(p.id), p));
+      return;
+    }
+    if (f.borrado || !f.datos) E[f.coleccion].delete(String(f.id));
+    else E[f.coleccion].set(String(f.id), f.datos);
+  }
+  let refrescando = false;
+  Nube.refrescar = async function () {
+    if (!Nube.activa || refrescando || document.visibilityState === 'hidden') return;
+    refrescando = true;
+    try {
+      for (const [k, fn] of Array.from(Nube.pendientes)) {
+        await fn();
+        Nube.pendientes.delete(k);
+      }
+      if (!Nube.pendientes.size) Nube.avisado = false;
+      // Se repasan los últimos segundos por si otro equipo guardó al mismo tiempo.
+      const desde = new Date(new Date(Nube.desde || 0).getTime() - 15000).toISOString();
+      const filas = await Nube.leer(desde);
+      let cambios = 0;
+      const foto = (f) => {
+        if (f.coleccion === 'meta') return Nube.firmaMeta;
+        if (f.coleccion === 'productos') {
+          const n = Number(String(f.id).slice(5));
+          return JSON.stringify(lista('productos').filter((x) => loteDe(x.id) === n));
+        }
+        return JSON.stringify(E[f.coleccion] ? E[f.coleccion].get(String(f.id)) : null);
+      };
+      for (const f of filas) {
+        if (Nube.pendientes.has(f.coleccion + '/' + f.id)) continue;
+        const antes = foto(f);
+        aplicarFila(f);
+        if (foto(f) !== antes) cambios++;
+      }
+      if (cambios && window.App) {
+        const h = location.hash || '#/';
+        const activo = document.activeElement;
+        const editando = App.cambiosSinGuardar || /nueva|editar|configuracion/.test(h) || document.querySelector('.modal') || (activo && /INPUT|TEXTAREA|SELECT/.test(activo.tagName));
+        if (!editando) App.ir(h);
+        if (App.actualizarPendientes) App.actualizarPendientes();
+      }
+    } catch (e) {
+      console.warn('No se pudo actualizar desde la nube', e);
+    } finally {
+      refrescando = false;
+    }
+  };
+  setInterval(() => Nube.refrescar(), 30000);
+  document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && Nube.refrescar());
+  window.addEventListener('online', () => Nube.refrescar());
+
   async function cargar() {
     let db = null;
     let uid = null;
+    if (Nube.configurada()) {
+      try {
+        await Nube.iniciar();
+      } catch (e) {
+        console.error(e);
+        pantallaAcceso({ soloMensaje: true, mensaje: 'No se pudo conectar con la base de datos. Revise su conexión a internet e intente de nuevo.' });
+        await new Promise(() => {});
+      }
+    }
     try {
-      if (window.claude && window.claude.use) {
+      if (!Nube.activa && window.claude && window.claude.use) {
         const espera = (ms) => new Promise((r) => setTimeout(() => r(null), ms));
         [db, uid] = await Promise.race([
           Promise.all([window.claude.use('db'), window.claude.use('user').then((u) => (u ? u.id() : null))]),
@@ -674,9 +929,9 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
     } catch (e) {
       db = null;
     }
-    if (db && uid) {
+    if (Nube.activa || (db && uid)) {
       try {
-        raiz = db.collection('data/users/' + uid).doc('jjv');
+        raiz = Nube.activa ? Nube.raiz() : db.collection('data/users/' + uid).doc('jjv');
         const m = await raiz.get();
         if (m.exists) Object.assign(E.meta, m.data());
         await Promise.all(
@@ -694,7 +949,7 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
             });
           })
         );
-        Demo.almacen = 'nube';
+        Demo.almacen = Nube.activa ? 'equipo' : 'nube';
       } catch (e) {
         console.error(e);
         raiz = null;
@@ -715,6 +970,10 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
     }
     E.meta.config = Object.assign({}, CONFIG_INICIAL, E.meta.config || {});
     E.meta.contadores = E.meta.contadores || {};
+    if (Nube.activa) {
+      USUARIO = Nube.usuario.nombre;
+      await Nube.ajustarContadores().catch((e) => console.warn(e));
+    }
   }
   /* ---- Logo JJV por defecto: se toma de la tienda y se guarda en este navegador ---- */
   const LOGO_BASE_URL = 'https://www.automotrizjjv.com/cdn/shop/files/ChatGPT_Image_2_may_2026_12_37_18.png?width=800';
@@ -788,6 +1047,12 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
     return new Date(Date.UTC(a, m - 1, d + Number(n || 0))).toISOString().slice(0, 10);
   };
   const sig = (nombre) => {
+    const reservado = Nube.activa ? Nube.tomar(nombre) : null;
+    if (reservado != null) {
+      E.meta.contadores[nombre] = Math.max(E.meta.contadores[nombre] || 0, reservado);
+      return reservado;
+    }
+    if (Nube.activa && nombre !== 'cotizacion' && nombre !== 'solicitud') return Date.now() * 100 + Math.floor(Math.random() * 100);
     E.meta.contadores[nombre] = (E.meta.contadores[nombre] || 0) + 1;
     return E.meta.contadores[nombre];
   };
@@ -1198,6 +1463,13 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
       if (r.ok) datos = await r.json();
     } catch (e) {}
     if (!Array.isArray(datos)) return;
+    if (Nube.activa) {
+      try {
+        await Nube.reservar('productos', datos.length + 10);
+      } catch (e) {
+        return;
+      }
+    }
     Demo.cargaInicial = importarProductos(datos);
     E.meta.semillas[CATALOGO_INICIAL.clave] = ahora();
     guardarMeta();
@@ -1230,10 +1502,96 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
   /* ============================ Rutas ============================ */
   const R = [];
   const ruta = (m, patron, fn) => R.push([m, new RegExp('^' + patron.replace(/:(\w+)/g, '([^/]+)') + '$'), fn]);
-  const USUARIO = 'admin';
+  let USUARIO = 'admin';
 
-  ruta('GET', '/api/auth/yo', () => ({ usuario: { id: 1, usuario: USUARIO, nombre: 'Administrador' } }));
-  ruta('POST', '/api/auth/logout', () => ({ ok: true }));
+  /* ---- Traer datos guardados antes (en este equipo o en un respaldo) a la base compartida ---- */
+  const entradas = (v) => (Array.isArray(v) ? v.map((x) => (Array.isArray(x) ? x[1] : x)) : []);
+  Demo.datosLocales = () => {
+    try {
+      const g = JSON.parse(localStorage.getItem('jjv-demo') || 'null');
+      return g && entradas(g.cotizaciones).length ? g : null;
+    } catch (e) {
+      return null;
+    }
+  };
+  async function fusionar(g) {
+    const clientes = entradas(g.clientes), productos = entradas(g.productos);
+    const cots = entradas(g.cotizaciones).filter((c) => c && !lista('cotizaciones').some((x) => x.token && x.token === c.token));
+    cots.sort((a, b) => (a.correlativo || a.id) - (b.correlativo || b.id));
+    if (Nube.activa) {
+      if (cots.length) await Nube.reservar('cotizacion', cots.length);
+      await Nube.reservar('clientes', clientes.length + 5);
+      await Nube.reservar('productos', productos.length + 5);
+    }
+    const mapaCli = new Map();
+    let nc = 0, np = 0, nq = 0;
+    for (const c of clientes) {
+      const ex = lista('clientes').find((x) => (c.rut && x.rut === c.rut) || (!c.rut && x.nombre === c.nombre && (x.telefono || '') === (c.telefono || '')));
+      if (ex) {
+        mapaCli.set(String(c.id), ex.id);
+        continue;
+      }
+      const n = { ...c, id: sig('clientes') };
+      guardar('clientes', n);
+      mapaCli.set(String(c.id), n.id);
+      nc++;
+    }
+    const porSku = new Map(lista('productos').filter((x) => x.sku).map((x) => [String(x.sku).toLowerCase(), x]));
+    const mapaProd = new Map();
+    for (const p of productos) {
+      const ex = p.sku && porSku.get(String(p.sku).toLowerCase());
+      if (ex) {
+        mapaProd.set(String(p.id), ex.id);
+        continue;
+      }
+      const n = { ...p, id: sig('productos'), foto: null };
+      guardar('productos', n);
+      if (n.sku) porSku.set(String(n.sku).toLowerCase(), n);
+      mapaProd.set(String(p.id), n.id);
+      np++;
+    }
+    for (const c of cots) {
+      const corr = sig('cotizacion');
+      const n = {
+        ...JSON.parse(JSON.stringify(c)),
+        id: corr, correlativo: corr, numero: (cfg().prefijo_cotizacion || '') + String(corr).padStart(6, '0'),
+        cliente_id: mapaCli.get(String(c.cliente_id)) || null, solicitud_id: null,
+      };
+      n.items = (n.items || []).map((i) => ({ ...i, producto_id: i.producto_id ? mapaProd.get(String(i.producto_id)) || null : null }));
+      n.historial = n.historial || [];
+      hist(n, USUARIO, 'Traída a la base compartida', c.numero && c.numero !== n.numero ? `Número anterior ${c.numero}` : '');
+      guardar('cotizaciones', n);
+      nq++;
+    }
+    guardarMeta();
+    return { cotizaciones: nq, clientes: nc, productos: np, solicitudes: 0 };
+  }
+  ruta('POST', '/api/admin/importar/local', async () => {
+    const g = Demo.datosLocales();
+    if (!g) fallo(400, 'Este equipo no tiene cotizaciones guardadas para subir.');
+    const r = await fusionar(g);
+    try {
+      localStorage.setItem('jjv-demo-subido', ahora());
+      localStorage.removeItem('jjv-demo');
+    } catch (e) {}
+    return r;
+  });
+  ruta('POST', '/api/admin/importar/respaldo', async (p, q, b) => {
+    if (!b.archivo || !b.archivo.text) fallo(400, 'Seleccione el archivo de respaldo.');
+    let g;
+    try {
+      g = JSON.parse(await b.archivo.text());
+    } catch (e) {
+      fallo(400, 'El archivo no es un respaldo JSON válido.');
+    }
+    return fusionar(g);
+  });
+
+  ruta('GET', '/api/auth/yo', () => ({ usuario: { id: 1, usuario: Nube.activa ? Nube.usuario.email : USUARIO, nombre: Nube.activa ? Nube.usuario.nombre : 'Administrador' } }));
+  ruta('POST', '/api/auth/logout', async () => {
+    if (Nube.activa) await Nube.cliente.auth.signOut().catch(() => {});
+    return { ok: true };
+  });
   ruta('GET', '/api/publico/empresa', () => {
     const c = cfg();
     return { nombre: c.empresa_nombre || 'AUTOMOTRIZ JJV', telefono: c.empresa_telefono, whatsapp: c.empresa_whatsapp, email: c.empresa_email, web: c.empresa_web, direccion: c.empresa_direccion, logo: !!(c.logo || Demo.logoBase), logoBase: !c.logo && !!Demo.logoBase };
@@ -1649,6 +2007,14 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
     const [ruta_, qs] = url.split('?');
     const metodo = (op.method || 'GET').toUpperCase();
     const q = Object.fromEntries(new URLSearchParams(qs || ''));
+    if (Nube.activa && metodo !== 'GET') {
+      try {
+        await Nube.prepararReservas(ruta_);
+      } catch (e) {
+        console.error(e);
+        return responder(503, { error: 'Sin conexión con la base de datos. Revise internet e intente nuevamente.' });
+      }
+    }
     for (const [m, re, fn] of R) {
       if (m !== metodo) continue;
       const k = ruta_.match(re);
@@ -1998,7 +2364,7 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
   document.addEventListener('click', async (e) => {
     if (e.target.closest('[data-salir]')) {
       await App.post('/api/auth/logout').catch(() => {});
-      location.href = '/login';
+      location.reload();
     } else if (e.target.closest('[data-mas]')) {
       $('#menuMas').hidden = !$('#menuMas').hidden;
     } else if (!e.target.closest('#menuMas')) {
@@ -2193,7 +2559,7 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
       condiciones: entrada.condiciones || '',
       observaciones: entrada.observaciones || '',
       notas_internas: entrada.notas_internas || '',
-      vendedor: entrada.vendedor || (() => { try { return localStorage.getItem('jjv-vendedor') || ''; } catch (e) { return ''; } })(),
+      vendedor: entrada.vendedor || (() => { try { return localStorage.getItem('jjv-vendedor') || ''; } catch (e) { return ''; } })() || (window.Demo.nube && window.Demo.nube.activa ? window.Demo.nube.usuario.nombre : ''),
       solicitud_id: entrada.solicitud_id || null,
     };
     if (st.cliente.rut) st.cliente.rut = JJV.formatearRut(st.cliente.rut);
@@ -3345,8 +3711,11 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
             <a class="btn" href="/api/admin/exportar/productos.csv">${icono('descargar')} Catálogo (Excel / CSV)</a>
             <a class="btn" href="/api/admin/exportar/solicitudes.csv">${icono('descargar')} Solicitudes (Excel / CSV)</a>
           </div>
-          ${App.enClaude ? '' : `<h3 style="margin-top:1.2rem">Traer datos de la versión en Claude</h3>
-          <p class="small muted">En la versión de Claude, descargue «Respaldo en formato JSON» desde Configuración y súbalo aquí. Se cargan clientes, catálogo, cotizaciones (con su historial) y solicitudes. Solo funciona en una instalación sin cotizaciones.</p>
+          ${window.Demo.almacen !== 'equipo' ? '' : `${window.Demo.datosLocales() ? `<h3 style="margin-top:1.2rem">Cotizaciones guardadas en este equipo</h3>
+          <p class="small muted">Este equipo tiene ${window.Demo.datosLocales().cotizaciones.length} cotizaciones hechas antes de activar la base compartida. Súbalas para que el equipo las vea; reciben un número nuevo y el anterior queda en su historial.</p>
+          <div class="botonera"><button class="btn btn-celeste" data-subir-local>${icono('subir')} Subir cotizaciones de este equipo</button></div>` : ''}
+          <h3 style="margin-top:1.2rem">Traer datos desde un respaldo</h3>
+          <p class="small muted">Suba un «Respaldo en formato JSON» (por ejemplo, el de la versión en Claude). Se agregan sus clientes, repuestos nuevos y cotizaciones, con número nuevo.</p>
           <div class="botonera"><input type="file" id="respaldo" accept=".json,application/json" style="max-width:320px"><button class="btn" data-restaurar>${icono('subir')} Cargar respaldo</button></div>`}
           <h3 style="margin-top:1.2rem">Formulario público</h3>
           <div class="enlace-copiar"><input readonly value="${esc(location.origin)}/solicitar"><a class="btn" href="/solicitar" target="_blank" rel="noopener">Abrir</a></div>
@@ -3372,6 +3741,10 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
         } else if (e.target.closest('[data-quitar-logo]')) {
           await App.del('/api/admin/configuracion/logo');
           await App.repintarDiseno();
+          App.ir('#/configuracion');
+        } else if (e.target.closest('[data-subir-local]')) {
+          const r = await App.post('/api/admin/importar/local');
+          App.toast(`Listo: se subieron ${r.cotizaciones} cotizaciones y ${r.clientes} clientes.`, 'ok');
           App.ir('#/configuracion');
         } else if (e.target.closest('[data-restaurar]')) {
           const archivo = $('#respaldo', vista).files[0];
@@ -3957,10 +4330,11 @@ window.generarPdfDemo = generarPdf;
     const aviso = document.getElementById('avisoDemo');
     const donde = {
       nube: 'Sus datos se guardan de forma privada en su cuenta de Claude y los verá en el celular y en el computador.',
+      equipo: 'Datos compartidos con todo el equipo.',
       navegador: 'Sus datos se guardan solo en este navegador.',
       memoria: 'Los datos no se guardarán al cerrar esta vista.',
     }[Demo.almacen];
-    aviso.textContent = `Versión para usar dentro de Claude. ${donde}`;
+    aviso.textContent = Demo.almacen === 'equipo' ? `${donde} Sesión: ${Demo.nube.usuario.email}` : window.claude ? `Versión para usar dentro de Claude. ${donde}` : donde;
     App.iniciar().then(() => {
       const c = Demo.cargaInicial;
       if (c && (c.creados || c.actualizados)) App.toast(`Catálogo de Contabilium cargado: ${c.creados.toLocaleString('es-CL')} repuestos nuevos, ${c.actualizados} actualizados.`, 'ok');
