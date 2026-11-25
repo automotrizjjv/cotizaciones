@@ -22,3 +22,7 @@ end $$;
 drop trigger if exists validar_registro on auth.users;
 create trigger validar_registro before insert on auth.users
   for each row execute function public.validar_registro();
+
+-- Cuenta única del equipo (todos entran con la misma clave)
+insert into public.equipo (email, nombre) values ('equipo@automotrizjjv.com', 'Equipo JJV')
+on conflict (email) do nothing;

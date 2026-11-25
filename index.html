@@ -690,7 +690,16 @@ html.con-sesion .superior [data-salir], html.con-sesion .pie-lateral [data-salir
     });
   const errNube = (e) => (e && e.message ? e.message : String(e));
 
-  function pantallaAcceso({ mensaje = '', error = '', soloMensaje = false, registro = false } = {}) {
+  /* Todo el equipo entra con una sola clave; cada persona solo escribe su nombre de vendedor. */
+  const EMAIL_EQUIPO = 'equipo@automotrizjjv.com';
+  const leerVendedor = () => {
+    try {
+      return localStorage.getItem('jjv-vendedor') || '';
+    } catch (e) {
+      return '';
+    }
+  };
+  function pantallaAcceso({ mensaje = '', soloMensaje = false, crear = false } = {}) {
     let el = document.getElementById('accesoNube');
     if (!el) {
       el = document.createElement('div');
@@ -698,16 +707,17 @@ html.con-sesion .superior [data-salir], html.con-sesion .pie-lateral [data-salir
       document.body.appendChild(el);
     }
     const logo = Demo.logoBase ? `<img src="${Demo.logoBase}" alt="AUTOMOTRIZ JJV" style="height:46px;margin:0 auto .4rem;display:block">` : '<div class="acceso-marca">AUTOMOTRIZ JJV</div>';
+    const nombre = leerVendedor().replace(/"/g, '&quot;');
     el.innerHTML = `<div class="acceso-caja">${logo}<h1>Sistema de Cotizaciones</h1>
       ${soloMensaje ? `<p class="acceso-msg">${mensaje}</p><button class="btn btn-primario btn-bloque" onclick="location.reload()">Reintentar</button>` : `
-      <form id="formAcceso" data-modo="${registro ? 'registro' : 'ingreso'}" novalidate>
-        ${registro ? '<p class="small muted" style="margin:0">Primera vez: use el correo que el administrador autorizó y elija su contraseña.</p>' : ''}
-        <div class="campo"><label for="accEmail">Correo</label><input id="accEmail" type="email" autocomplete="username" required></div>
-        <div class="campo"><label for="accPass">${registro ? 'Elija una contraseña (mínimo 8 caracteres)' : 'Contraseña'}</label><input id="accPass" type="password" autocomplete="${registro ? 'new-password' : 'current-password'}" required></div>
-        ${registro ? '<div class="campo"><label for="accPass2">Repita la contraseña</label><input id="accPass2" type="password" autocomplete="new-password" required></div>' : ''}
-        <p class="acceso-error" ${error ? '' : 'hidden'}>${error}</p>
-        <button class="btn btn-primario btn-grande btn-bloque" type="submit">${registro ? 'Crear mi cuenta' : 'Ingresar'}</button>
-        <p class="small" style="text-align:center;margin:.8rem 0 0"><a href="#" data-cambiar-modo>${registro ? 'Ya tengo cuenta: ingresar' : '¿Primera vez? Crear mi contraseña'}</a></p>
+      <form id="formAcceso" data-modo="${crear ? 'crear' : 'ingreso'}" novalidate>
+        ${crear ? '<p class="small muted" style="margin:0">Solo la primera vez: elija la clave que usará todo el equipo.</p>' : ''}
+        <div class="campo"><label for="accNombre">Su nombre (vendedor)</label><input id="accNombre" autocomplete="name" maxlength="80" placeholder="Ej: Juan Pérez" value="${nombre}" required></div>
+        <div class="campo"><label for="accPass">${crear ? 'Nueva clave del equipo (mínimo 8 caracteres)' : 'Clave del equipo'}</label><input id="accPass" type="password" autocomplete="${crear ? 'new-password' : 'current-password'}" required></div>
+        ${crear ? '<div class="campo"><label for="accPass2">Repita la clave</label><input id="accPass2" type="password" autocomplete="new-password" required></div>' : ''}
+        <p class="acceso-error" hidden></p>
+        <button class="btn btn-primario btn-grande btn-bloque" type="submit">${crear ? 'Crear clave e ingresar' : 'Ingresar'}</button>
+        <p class="small" style="text-align:center;margin:.8rem 0 0"><a href="#" data-cambiar-modo>${crear ? 'Volver a ingresar' : 'Crear la clave del equipo (solo la primera vez)'}</a></p>
       </form>`}</div>`;
     return el;
   }
@@ -723,44 +733,48 @@ html.con-sesion .superior [data-salir], html.con-sesion .pie-lateral [data-salir
         el.addEventListener('click', (ev) => {
           if (!ev.target.closest('[data-cambiar-modo]')) return;
           ev.preventDefault();
-          const email = el.querySelector('#accEmail').value;
-          pantallaAcceso({ registro: el.querySelector('#formAcceso').dataset.modo !== 'registro' });
-          el.querySelector('#accEmail').value = email;
+          pantallaAcceso({ crear: el.querySelector('#formAcceso').dataset.modo !== 'crear' });
         });
         el.addEventListener('submit', async (ev) => {
           ev.preventDefault();
-          const form = el.querySelector('#formAcceso');
-          const registro = form.dataset.modo === 'registro';
+          const crear = el.querySelector('#formAcceso').dataset.modo === 'crear';
           const boton = el.querySelector('button[type=submit]');
-          const email = el.querySelector('#accEmail').value.trim();
+          const nombre = el.querySelector('#accNombre').value.trim();
           const pass = el.querySelector('#accPass').value;
           const err = el.querySelector('.acceso-error');
           const mostrar = (t) => ((err.hidden = false), (err.textContent = t));
-          if (!email || !pass) return mostrar('Escriba su correo y su contraseña.');
-          if (registro && pass.length < 8) return mostrar('La contraseña debe tener al menos 8 caracteres.');
-          if (registro && pass !== el.querySelector('#accPass2').value) return mostrar('Las contraseñas no coinciden.');
+          if (!nombre) return mostrar('Escriba su nombre: aparecerá como vendedor en las cotizaciones.');
+          if (!pass) return mostrar('Escriba la clave del equipo.');
+          if (crear && pass.length < 8) return mostrar('La clave debe tener al menos 8 caracteres.');
+          if (crear && pass !== el.querySelector('#accPass2').value) return mostrar('Las claves no coinciden.');
           boton.disabled = true;
-          const r = await (registro
-            ? Nube.cliente.auth.signUp({ email, password: pass })
-            : Nube.cliente.auth.signInWithPassword({ email, password: pass })
+          const r = await (crear
+            ? Nube.cliente.auth.signUp({ email: EMAIL_EQUIPO, password: pass })
+            : Nube.cliente.auth.signInWithPassword({ email: EMAIL_EQUIPO, password: pass })
           ).catch((e) => ({ error: e }));
           boton.disabled = false;
           if (r.error) {
             const m = errNube(r.error);
-            if (/no_autorizado|database error/i.test(m)) return mostrar('Este correo no está autorizado. Pídale al administrador que lo agregue.');
-            if (/already|registered|exists/i.test(m)) return mostrar('Ese correo ya tiene cuenta. Use «Ya tengo cuenta: ingresar».');
-            if (/invalid/i.test(m)) return mostrar('Correo o contraseña incorrectos.');
-            if (/password/i.test(m)) return mostrar('Elija una contraseña más segura (mínimo 8 caracteres, con letras y números).');
+            if (/already|registered|exists/i.test(m)) return mostrar('La clave del equipo ya fue creada. Use «Volver a ingresar».');
+            if (/invalid/i.test(m)) return mostrar('Clave incorrecta.');
+            if (/password/i.test(m)) return mostrar('Elija una clave más segura (mínimo 8 caracteres, con letras y números).');
+            if (/not_allowed|disabled|no_autorizado|database error/i.test(m)) return mostrar('La clave del equipo ya fue creada. Use «Volver a ingresar».');
             return mostrar('No se pudo ingresar: ' + m);
           }
-          if (!r.data || !r.data.session) return mostrar('Cuenta creada. Ahora ingrese con su correo y contraseña.');
+          if (!r.data || !r.data.session) return mostrar('Clave creada. Ahora ingrese con ella.');
+          try {
+            localStorage.setItem('jjv-vendedor', nombre);
+          } catch (e) {}
           resolver(r.data.session);
         });
       });
     }
     const u = sesion.user;
-    const md = u.user_metadata || {};
-    Nube.usuario = { id: u.id, email: u.email, nombre: md.nombre || md.display_name || md.full_name || md.name || String(u.email || '').split('@')[0] };
+    Nube.usuario = { id: u.id, email: u.email, nombre: leerVendedor() || 'Equipo JJV' };
+    Nube.cambiarClave = async (nueva) => {
+      const { error } = await Nube.cliente.auth.updateUser({ password: nueva });
+      if (error) throw error;
+    };
     const el = document.getElementById('accesoNube');
     if (el) el.remove();
     Nube.filas = await Nube.leer(null);
@@ -2029,6 +2043,7 @@ html.con-sesion .superior [data-salir], html.con-sesion .pie-lateral [data-salir
     const [ruta_, qs] = url.split('?');
     const metodo = (op.method || 'GET').toUpperCase();
     const q = Object.fromEntries(new URLSearchParams(qs || ''));
+    if (Nube.activa) USUARIO = Nube.usuario.nombre;
     if (Nube.activa && metodo !== 'GET') {
       try {
         await Nube.prepararReservas(ruta_);
@@ -2881,6 +2896,7 @@ html.con-sesion .superior [data-salir], html.con-sesion .pie-lateral [data-salir
         solicitud_id: st.solicitud_id,
       };
       try { localStorage.setItem('jjv-vendedor', cuerpo.vendedor); } catch (e) {}
+      if (cuerpo.vendedor && window.Demo.nube && window.Demo.nube.activa) window.Demo.nube.usuario.nombre = cuerpo.vendedor;
       const boton = $('#guardar');
       boton.disabled = true;
       try {
@@ -4263,7 +4279,25 @@ window.generarPdfDemo = generarPdf;
     if (url) url.closest('.campo').remove();
     vista.querySelectorAll('a[href="/api/admin/exportar/respaldo.db"]').forEach((a) => a.remove());
     const usuarios = vista.querySelector('#formUsuario')?.closest('.tarjeta');
-    if (usuarios) usuarios.innerHTML = `<h2>Acceso</h2><p class="small muted">En esta versión, solo usted puede abrir la aplicación con su cuenta de Claude y sus datos son privados. Los usuarios y contraseñas propios se activan en la versión publicada en internet.</p>`;
+    const nube = Demo.nube && Demo.nube.activa;
+    if (usuarios && nube) {
+      usuarios.innerHTML = `<h2>Clave del equipo</h2><p class="small muted">Todo el equipo entra con la misma clave. Al cambiarla, los demás equipos siguen con su sesión abierta; la nueva clave se pide la próxima vez que alguien ingrese.</p>
+        <div class="rejilla rejilla-2"><div class="campo"><label for="claveNueva">Nueva clave (mínimo 8 caracteres)</label><input id="claveNueva" type="password" autocomplete="new-password"></div>
+        <div class="campo"><label for="claveNueva2">Repita la nueva clave</label><input id="claveNueva2" type="password" autocomplete="new-password"></div></div>
+        <div class="botonera" style="margin-top:.6rem"><button class="btn" data-cambiar-clave>${icono('guardar')} Cambiar clave</button></div>`;
+      usuarios.querySelector('[data-cambiar-clave]').addEventListener('click', async () => {
+        const a = $('#claveNueva', usuarios).value, b = $('#claveNueva2', usuarios).value;
+        if (a.length < 8) return App.toast('La clave debe tener al menos 8 caracteres.', 'error');
+        if (a !== b) return App.toast('Las claves no coinciden.', 'error');
+        try {
+          await Demo.nube.cambiarClave(a);
+          $('#claveNueva', usuarios).value = $('#claveNueva2', usuarios).value = '';
+          App.toast('Clave del equipo cambiada.', 'ok');
+        } catch (e) {
+          App.toast('No se pudo cambiar la clave: ' + (e.message || e), 'error');
+        }
+      });
+    } else if (usuarios) usuarios.innerHTML = `<h2>Acceso</h2><p class="small muted">En esta versión, solo usted puede abrir la aplicación con su cuenta de Claude y sus datos son privados. Los usuarios y contraseñas propios se activan en la versión publicada en internet.</p>`;
   };
 
   /* ---- Vista del cliente: cotización ---- */
@@ -4356,7 +4390,7 @@ window.generarPdfDemo = generarPdf;
       navegador: 'Sus datos se guardan solo en este navegador.',
       memoria: 'Los datos no se guardarán al cerrar esta vista.',
     }[Demo.almacen];
-    aviso.textContent = Demo.almacen === 'equipo' ? `${donde} Sesión: ${Demo.nube.usuario.email}` : window.claude ? `Versión para usar dentro de Claude. ${donde}` : donde;
+    aviso.textContent = Demo.almacen === 'equipo' ? `${donde} Vendedor: ${Demo.nube.usuario.nombre}` : window.claude ? `Versión para usar dentro de Claude. ${donde}` : donde;
     App.iniciar().then(() => {
       const c = Demo.cargaInicial;
       if (c && (c.creados || c.actualizados)) App.toast(`Catálogo de Contabilium cargado: ${c.creados.toLocaleString('es-CL')} repuestos nuevos, ${c.actualizados} actualizados.`, 'ok');
