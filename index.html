@@ -4073,12 +4073,13 @@ function generarPdf(cot, cfg) {
       ['Banco', cfg.banco_nombre],
       ['Tipo de cuenta', cfg.banco_tipo_cuenta],
       ['N° de cuenta', cfg.banco_numero],
-      ['Titular', cfg.banco_titular],
       ['RUT', cfg.banco_rut ? U.formatearRut(cfg.banco_rut) : ''],
       ['Correo', cfg.banco_email],
     ].filter(([, v]) => v);
-    if (filasBanco.length) {
-      const altoB = 26 + Math.ceil(filasBanco.length / 2) * 15 + 4;
+    const titularBanco = cfg.banco_titular || '';
+    if (filasBanco.length || titularBanco) {
+      const extraTitular = titularBanco ? 15 : 0;
+      const altoB = 26 + extraTitular + Math.ceil(filasBanco.length / 2) * 15 + 4;
       if (y + altoB + 10 > LIMITE_INF) {
         doc.addPage();
         y = M;
@@ -4087,9 +4088,13 @@ function generarPdf(cot, cfg) {
       doc.rect(M, y, 4, altoB).fill(C.celeste);
       doc.fillColor(C.celeste).font('Helvetica-Bold').fontSize(8.5).text('DATOS PARA TRANSFERENCIA', M + 14, y + 9, { characterSpacing: 1 });
       const anchoCol = (UTIL - 28) / 2;
+      if (titularBanco) {
+        doc.fillColor(C.gris).font('Helvetica').fontSize(8.5).text('Titular', M + 14, y + 24, { width: 80 });
+        doc.fillColor(C.texto).font('Helvetica-Bold').fontSize(9).text(titularBanco, M + 96, y + 24, { width: UTIL - 110, height: 13, ellipsis: true, lineBreak: false });
+      }
       filasBanco.forEach(([k, v], i) => {
         const xx = M + 14 + (i % 2) * anchoCol;
-        const yy = y + 24 + Math.floor(i / 2) * 15;
+        const yy = y + 24 + extraTitular + Math.floor(i / 2) * 15;
         doc.fillColor(C.gris).font('Helvetica').fontSize(8.5).text(k, xx, yy, { width: 80 });
         doc.fillColor(C.texto).font('Helvetica-Bold').fontSize(9).text(String(v), xx + 82, yy, { width: anchoCol - 90, height: 13, ellipsis: true, lineBreak: false });
       });
