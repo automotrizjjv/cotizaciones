@@ -3693,11 +3693,11 @@ html.con-sesion .superior [data-salir], html.con-sesion .pie-lateral [data-salir
       </section>
       <section class="tarjeta"><div class="tarjeta-titulo"><h2>Datos bancarios</h2></div>
         <form id="formBanco" class="rejilla rejilla-2" novalidate>
-          ${campo('banco_nombre', 'Banco', 'placeholder="Ej: Banco Estado"')}
-          ${campo('banco_tipo_cuenta', 'Tipo de cuenta', 'placeholder="Ej: Cuenta corriente"')}
+          ${campo('banco_nombre', 'Banco')}
+          ${campo('banco_tipo_cuenta', 'Tipo de cuenta')}
           ${campo('banco_numero', 'Número de cuenta', 'inputmode="numeric" autocomplete="off"')}
-          ${campo('banco_titular', 'Titular', 'placeholder="Ej: Automotriz JJV SpA"')}
-          ${campo('banco_rut', 'RUT del titular', 'placeholder="76.123.456-7"')}
+          ${campo('banco_titular', 'Titular')}
+          ${campo('banco_rut', 'RUT del titular')}
           ${campo('banco_email', 'Correo para enviar el comprobante', 'type="email"')}
         </form>
         <p class="small muted">Aparecen en el PDF de cada cotización y en el mensaje de WhatsApp. Deje vacío lo que no quiera mostrar.</p>
