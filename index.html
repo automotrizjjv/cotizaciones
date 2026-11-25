@@ -140,6 +140,7 @@ input[type='checkbox'] { width: 20px; height: 20px; min-height: 0; accent-color:
 }
 .superior .marca { display: flex; align-items: center; gap: 0.55rem; font-weight: 800; letter-spacing: 0.3px; font-size: 1rem; color: #fff; text-decoration: none; }
 .marca-logo-mini { height: 32px; width: auto; max-width: 110px; object-fit: contain; background: #fff; border-radius: 6px; padding: 2px 4px; }
+.marca-logo-mini.base { background: transparent; padding: 0; border-radius: 0; height: 30px; }
 .marca-sello { width: 32px; height: 32px; border-radius: 8px; background: var(--celeste); display: grid; place-items: center; font-weight: 900; font-size: 0.8rem; color: var(--marino); }
 .superior .btn { min-height: 38px; color: #fff; background: transparent; border-color: rgba(255, 255, 255, 0.25); padding: 0.4rem 0.7rem; }
 .superior .btn:hover { background: rgba(255, 255, 255, 0.1); }
@@ -712,7 +713,60 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
     E.meta.config = Object.assign({}, CONFIG_INICIAL, E.meta.config || {});
     E.meta.contadores = E.meta.contadores || {};
   }
-  const listo = cargar().then(aplicarCatalogoInicial);
+  /* ---- Logo JJV por defecto: se toma de la tienda y se guarda en este navegador ---- */
+  const LOGO_BASE_URL = 'https://www.automotrizjjv.com/cdn/shop/files/ChatGPT_Image_2_may_2026_12_37_18.png?width=800';
+  const LOGO_BASE_CLAVE = 'jjv-logo-base-v1';
+  Demo.logoBase = '';
+  try { Demo.logoBase = localStorage.getItem(LOGO_BASE_CLAVE) || ''; } catch (e) {}
+  // Quita el fondo oscuro del logo y lo recorta al contenido (queda PNG transparente).
+  async function prepararLogoBase(blob) {
+    const url = URL.createObjectURL(blob);
+    try {
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      const w = img.naturalWidth, h = img.naturalHeight;
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      const x = c.getContext('2d');
+      x.drawImage(img, 0, 0);
+      const d = x.getImageData(0, 0, w, h);
+      const px = d.data;
+      let x0 = w, y0 = h, x1 = -1, y1 = -1;
+      for (let i = 0; i < px.length; i += 4) {
+        const m = Math.max(px[i], px[i + 1], px[i + 2]);
+        const a = Math.max(0, Math.min(255, Math.round(((m - 35) * 255) / 60)));
+        px[i + 3] = a;
+        if (a > 60) {
+          const k = i / 4, cx = k % w, cy = (k / w) | 0;
+          if (cx < x0) x0 = cx; if (cx > x1) x1 = cx; if (cy < y0) y0 = cy; if (cy > y1) y1 = cy;
+        }
+      }
+      if (x1 < 0) return '';
+      x.putImageData(d, 0, 0);
+      const pad = Math.round((y1 - y0) * 0.08);
+      x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad); x1 = Math.min(w - 1, x1 + pad); y1 = Math.min(h - 1, y1 + pad);
+      const o = document.createElement('canvas');
+      o.width = x1 - x0 + 1; o.height = y1 - y0 + 1;
+      o.getContext('2d').drawImage(c, x0, y0, o.width, o.height, 0, 0, o.width, o.height);
+      return o.toDataURL('image/png');
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+  async function cargarLogoBase() {
+    if (Demo.logoBase) return;
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 6000);
+      const r = await fetch(LOGO_BASE_URL, { signal: ctrl.signal });
+      clearTimeout(t);
+      if (!r.ok) return;
+      Demo.logoBase = await prepararLogoBase(await r.blob());
+      try { if (Demo.logoBase) localStorage.setItem(LOGO_BASE_CLAVE, Demo.logoBase); } catch (e) {}
+    } catch (e) {}
+  }
+  const listo = cargar().then(cargarLogoBase).then(aplicarCatalogoInicial);
   Demo.listo = listo;
 
   /* ============================ Utilidades ============================ */
@@ -787,7 +841,8 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
   }
   const borrarImagen = (k) => k && E.fotos.has(k) && eliminar('fotos', k);
   Demo.foto = (k) => (E.fotos.get(k) || {}).datos || '';
-  Demo.logo = () => (cfg().logo ? Demo.foto(cfg().logo) : '');
+  Demo.logo = () => (cfg().logo ? Demo.foto(cfg().logo) : Demo.logoBase || '');
+  Demo.logoEsBase = () => !cfg().logo && !!Demo.logoBase;
 
   /* ============================ Clientes ============================ */
   function normalizarCliente(c, exigirRut) {
@@ -1160,7 +1215,7 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
   ruta('POST', '/api/auth/logout', () => ({ ok: true }));
   ruta('GET', '/api/publico/empresa', () => {
     const c = cfg();
-    return { nombre: c.empresa_nombre || 'AUTOMOTRIZ JJV', telefono: c.empresa_telefono, whatsapp: c.empresa_whatsapp, email: c.empresa_email, web: c.empresa_web, direccion: c.empresa_direccion, logo: !!c.logo };
+    return { nombre: c.empresa_nombre || 'AUTOMOTRIZ JJV', telefono: c.empresa_telefono, whatsapp: c.empresa_whatsapp, email: c.empresa_email, web: c.empresa_web, direccion: c.empresa_direccion, logo: !!(c.logo || Demo.logoBase), logoBase: !c.logo && !!Demo.logoBase };
   });
   ruta('GET', '/api/publico/token-formulario', () => ({ token: 'demo' }));
 
@@ -1876,7 +1931,7 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
   function marcaHtml() {
     const e = App.estado.empresa;
     return e.logo
-      ? `<img class="marca-logo-mini" src="/logo?v=${Date.now() % 100000}" alt="">`
+      ? `<img class="marca-logo-mini${e.logoBase ? ' base' : ''}" src="/logo?v=${Date.now() % 100000}" alt="AUTOMOTRIZ JJV">`
       : `<span class="marca-sello">JJV</span>`;
   }
 
@@ -3198,7 +3253,7 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
         </form>
       </section>
       <section class="tarjeta"><div class="tarjeta-titulo"><h2>Logotipo</h2></div>
-        <div class="vista-foto">${cfg.logo ? `<img class="logo-config" src="/logo?v=${Date.now()}" alt="Logotipo">` : '<span class="muted">Sin logotipo cargado: se usa el nombre en texto.</span>'}</div>
+        <div class="vista-foto">${cfg.logo ? `<img class="logo-config" src="/logo?v=${Date.now()}" alt="Logotipo">` : window.Demo && window.Demo.logoBase ? `<img class="logo-config" style="background:#0b2545" src="${window.Demo.logoBase}" alt="Logo JJV"><p class="small muted">Se usa el logo JJV de la tienda. Si subes otro, reemplaza a este.</p>` : '<span class="muted">Sin logotipo cargado: se usa el nombre en texto.</span>'}</div>
         <div class="botonera" style="margin-top:.8rem"><input type="file" id="logo" accept="image/png,image/jpeg" style="max-width:320px">
           <button class="btn" data-logo>${icono('subir')} Subir logotipo</button>${cfg.logo ? `<button class="btn btn-peligro" data-quitar-logo>Quitar</button>` : ''}</div>
         <p class="small muted">PNG o JPG, idealmente horizontal y con fondo blanco o transparente (máx. 3 MB).</p>
@@ -3366,7 +3421,7 @@ function generarPdf(cot, cfg) {
     let logoOk = false;
     if (logo) {
       try {
-        doc.roundedRect(M, 20, 150, 72, 8).fill(C.blanco);
+        if (!(window.Demo && window.Demo.logoEsBase && window.Demo.logoEsBase())) doc.roundedRect(M, 20, 150, 72, 8).fill(C.blanco);
         doc.image(logo, M + 8, 26, { fit: [134, 60], align: 'center', valign: 'center' });
         logoOk = true;
       } catch (e) {
