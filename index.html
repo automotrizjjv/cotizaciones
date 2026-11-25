@@ -591,6 +591,7 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
     empresa_nombre: 'AUTOMOTRIZ JJV', empresa_rut: '', empresa_giro: '', empresa_direccion: '', empresa_telefono: '',
     empresa_whatsapp: '', empresa_email: '', empresa_web: '', logo: '', vigencia_dias: '7', precios_con_iva: '1',
     aplica_iva: '1', prefijo_cotizacion: 'COT-', prefijo_solicitud: 'SOL-', condiciones: '', pie_pdf: '', url_publica: '',
+    banco_nombre: '', banco_tipo_cuenta: '', banco_numero: '', banco_titular: '', banco_rut: '', banco_email: '',
   };
 
   let raiz = null; // referencia al documento raíz en la base de datos
@@ -917,6 +918,7 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
       cliente, items, calc, vigencia_dias: vig,
       vehiculo: { marca: txt(b.vehiculo?.marca, 60), modelo: txt(b.vehiculo?.modelo, 80), anio: txt(b.vehiculo?.anio, 20) },
       condiciones: txt(b.condiciones, 4000), observaciones: txt(b.observaciones, 4000), notas_internas: txt(b.notas_internas, 4000),
+      vendedor: txt(b.vendedor, 80),
       solicitud_id: b.solicitud_id ? Number(b.solicitud_id) : null,
     };
   }
@@ -962,7 +964,7 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
         cliente_nombre: d.cliente.nombre, cliente_rut: d.cliente.rut || null, cliente_telefono: d.cliente.whatsapp || d.cliente.telefono,
         cliente_email: d.cliente.email || null, vehiculo_marca: d.vehiculo.marca || null, vehiculo_modelo: d.vehiculo.modelo || null,
         vehiculo_anio: d.vehiculo.anio || null, condiciones: d.condiciones || null, observaciones: d.observaciones || null,
-        notas_internas: d.notas_internas || null, token: token(), solicitud_id: d.solicitud_id, duplicada_de: extra.duplicada_de || null,
+        notas_internas: d.notas_internas || null, vendedor: d.vendedor || null, token: token(), solicitud_id: d.solicitud_id, duplicada_de: extra.duplicada_de || null,
         version: 1, creado_por: usuario, creado: ahora(), actualizado: ahora(), historial: [],
       },
       totales(d.calc)
@@ -994,7 +996,7 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
       cliente_telefono: d.cliente.whatsapp || d.cliente.telefono, cliente_email: d.cliente.email || null,
       vehiculo_marca: d.vehiculo.marca || null, vehiculo_modelo: d.vehiculo.modelo || null, vehiculo_anio: d.vehiculo.anio || null,
       condiciones: d.condiciones || null, observaciones: d.observaciones || null, notas_internas: d.notas_internas || null,
-      version: cot.version + 1, actualizado: ahora(),
+      vendedor: d.vendedor || null, version: cot.version + 1, actualizado: ahora(),
     });
     if (cot.estado === 'Vencida' && vence >= hoy()) cot.estado = 'Pendiente';
     cot.items = prepararItems(d);
@@ -1011,6 +1013,7 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
     items: c.items.map((i) => ({ producto_id: i.producto_id, sku: i.sku, nombre: i.nombre, oem: i.oem, cantidad: i.cantidad, precio_unitario: i.precio_unitario, descuento_pct: i.descuento_pct })),
     precios_con_iva: !!c.precios_con_iva, aplica_iva: !!c.aplica_iva, descuento_global_pct: c.descuento_global_pct,
     vigencia_dias: c.vigencia_dias, condiciones: c.condiciones, observaciones: c.observaciones, notas_internas: c.notas_internas,
+    vendedor: c.vendedor,
   });
 
   function cambiarEstado(cot, estado, usuario, detalle) {
@@ -1067,6 +1070,20 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
     return { total: filas.length, filas: filas.slice((pag - 1) * lim, pag * lim).map(resumenFila), pagina: pag, limite: lim, _todas: filas };
   }
 
+  function lineasBanco() {
+    const c = cfg();
+    const l = [
+      c.banco_nombre && `Banco: ${c.banco_nombre}`,
+      c.banco_tipo_cuenta && `Tipo de cuenta: ${c.banco_tipo_cuenta}`,
+      c.banco_numero && `N° de cuenta: ${c.banco_numero}`,
+      c.banco_titular && `Titular: ${c.banco_titular}`,
+      c.banco_rut && `RUT: ${U.formatearRut(c.banco_rut)}`,
+      c.banco_email && `Correo: ${c.banco_email}`,
+    ].filter(Boolean);
+    return l.length ? ['Datos para transferencia:', ...l] : [];
+  }
+  Demo.lineasBanco = lineasBanco;
+
   function mensajeWhatsapp(c) {
     const empresa = cfg().empresa_nombre || 'AUTOMOTRIZ JJV';
     const nombre = String(c.cliente_nombre || '').trim().split(/\s+/)[0] || '';
@@ -1076,7 +1093,9 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
       `Le enviamos la cotización *N° ${c.numero}* del ${U.fechaCl(c.fecha)}:`, '',
       ...c.items.map((i) => `• ${Number(i.cantidad)} x ${i.nombre}${i.sku ? ` (SKU ${i.sku})` : ''}: ${U.clp(i.subtotal)}`), '',
       `*Total: ${U.clp(c.total)}*${ivaTxt}`, `Válida hasta el ${U.fechaCl(c.vence)}.`, '',
+      ...lineasBanco().map((l, i) => (i === 0 ? `*${l}*` : l)), ...(lineasBanco().length ? [''] : []),
       'Le adjuntamos la cotización en PDF.', '', 'Quedamos atentos a sus consultas. ¡Saludos!',
+      ...(c.vendedor ? [c.vendedor, empresa] : []),
     ].join('\n');
   }
   Demo.cotizacionPorToken = (t) => lista('cotizaciones').find((c) => c.token === t) || null;
@@ -1097,7 +1116,7 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
     'cotizaciones.csv': (q) =>
       csv(
         listar({ ...q, limite: 500 })._todas.flatMap((c) => c.items.map((i) => ({ ...c, ...i, repuesto: i.nombre }))),
-        [['numero', 'N° cotización'], [(f) => U.fechaCl(f.fecha), 'Fecha'], [(f) => U.fechaCl(f.vence), 'Vence'], ['estado', 'Estado'], ['cliente_nombre', 'Cliente'], [(f) => rutF(f.cliente_rut), 'RUT'], ['cliente_telefono', 'Teléfono'], ['cliente_email', 'Correo'], ['vehiculo_marca', 'Marca'], ['vehiculo_modelo', 'Modelo'], ['vehiculo_anio', 'Año'], ['sku', 'SKU'], ['repuesto', 'Repuesto'], ['oem', 'OEM'], ['cantidad', 'Cantidad'], ['precio_unitario', 'Precio unitario'], ['descuento_pct', 'Descuento %'], ['subtotal', 'Subtotal línea'], ['descuento_total', 'Descuento total'], ['neto', 'Neto'], ['iva', 'IVA'], ['total', 'Total']]
+        [['numero', 'N° cotización'], [(f) => U.fechaCl(f.fecha), 'Fecha'], [(f) => U.fechaCl(f.vence), 'Vence'], ['estado', 'Estado'], ['vendedor', 'Vendedor'], ['cliente_nombre', 'Cliente'], [(f) => rutF(f.cliente_rut), 'RUT'], ['cliente_telefono', 'Teléfono'], ['cliente_email', 'Correo'], ['vehiculo_marca', 'Marca'], ['vehiculo_modelo', 'Modelo'], ['vehiculo_anio', 'Año'], ['sku', 'SKU'], ['repuesto', 'Repuesto'], ['oem', 'OEM'], ['cantidad', 'Cantidad'], ['precio_unitario', 'Precio unitario'], ['descuento_pct', 'Descuento %'], ['subtotal', 'Subtotal línea'], ['descuento_total', 'Descuento total'], ['neto', 'Neto'], ['iva', 'IVA'], ['total', 'Total']]
       ),
     'clientes.csv': () => csv(lista('clientes').sort((a, b) => nocase(a.nombre, b.nombre)), [['nombre', 'Nombre / Razón social'], [(f) => rutF(f.rut), 'RUT'], ['telefono', 'Teléfono'], ['whatsapp', 'WhatsApp'], ['email', 'Correo'], ['direccion', 'Dirección'], ['notas', 'Notas'], ['creado', 'Creado']]),
     'productos.csv': () => csv(lista('productos').sort((a, b) => nocase(a.nombre, b.nombre)), ['sku', 'nombre', 'precio', 'stock', 'oem', 'marca', 'modelo', 'anio', 'descripcion', 'observaciones'].map((k) => [k, k])),
@@ -1558,7 +1577,7 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
   });
 
   /* ---- Configuración ---- */
-  const CLAVES = ['empresa_nombre', 'empresa_rut', 'empresa_giro', 'empresa_direccion', 'empresa_telefono', 'empresa_whatsapp', 'empresa_email', 'empresa_web', 'vigencia_dias', 'precios_con_iva', 'aplica_iva', 'prefijo_cotizacion', 'prefijo_solicitud', 'condiciones', 'pie_pdf', 'url_publica'];
+  const CLAVES = ['empresa_nombre', 'empresa_rut', 'empresa_giro', 'empresa_direccion', 'empresa_telefono', 'empresa_whatsapp', 'empresa_email', 'empresa_web', 'vigencia_dias', 'precios_con_iva', 'aplica_iva', 'prefijo_cotizacion', 'prefijo_solicitud', 'condiciones', 'pie_pdf', 'url_publica', 'banco_nombre', 'banco_tipo_cuenta', 'banco_numero', 'banco_titular', 'banco_rut', 'banco_email'];
   ruta('GET', '/api/admin/configuracion', () => ({ ...cfg() }));
   ruta('PUT', '/api/admin/configuracion', (p, q, b) => {
     const o = {};
@@ -2174,6 +2193,7 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
       condiciones: entrada.condiciones || '',
       observaciones: entrada.observaciones || '',
       notas_internas: entrada.notas_internas || '',
+      vendedor: entrada.vendedor || (() => { try { return localStorage.getItem('jjv-vendedor') || ''; } catch (e) { return ''; } })(),
       solicitud_id: entrada.solicitud_id || null,
     };
     if (st.cliente.rut) st.cliente.rut = JJV.formatearRut(st.cliente.rut);
@@ -2185,6 +2205,11 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
         ${idEditar ? `<a class="btn" href="#/cotizaciones/${idEditar}">${icono('flecha')} Volver</a>` : ''}</div>
       <div id="errores"></div>
       <form id="formCot" novalidate>
+        <section class="tarjeta seccion-form"><div class="tarjeta-titulo"><h2>Vendedor</h2></div>
+          <div class="campo"><label for="o_vend">Nombre del vendedor (aparece en el PDF)</label><input id="o_vend" autocomplete="name" maxlength="80" placeholder="Ej: Juan Pérez" value="${esc(st.vendedor)}">
+            <span class="ayuda">Queda guardado en este equipo para las próximas cotizaciones.</span></div>
+        </section>
+
         <section class="tarjeta seccion-form"><div class="tarjeta-titulo"><h2><span class="paso">1</span>Cliente</h2><span id="estadoRut" class="estado-rut"></span></div>
           <div class="rejilla rejilla-2">
             <div class="campo"><label for="c_rut">RUT</label><input id="c_rut" name="rut" placeholder="12.345.678-9" value="${esc(st.cliente.rut)}">
@@ -2464,8 +2489,10 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
         condiciones: $('#o_cond').value,
         observaciones: $('#o_obs').value,
         notas_internas: $('#o_int').value,
+        vendedor: $('#o_vend').value.trim(),
         solicitud_id: st.solicitud_id,
       };
+      try { localStorage.setItem('jjv-vendedor', cuerpo.vendedor); } catch (e) {}
       const boton = $('#guardar');
       boton.disabled = true;
       try {
@@ -2531,7 +2558,7 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
           <dl class="datos-lista"><dt>Nombre</dt><dd>${c.cliente_id ? `<a href="#/clientes/${c.cliente_id}">${esc(c.cliente_nombre)}</a>` : esc(c.cliente_nombre)}</dd>
           <dt>RUT</dt><dd>${c.cliente_rut ? esc(JJV.formatearRut(c.cliente_rut)) : '—'}</dd>
           <dt>Teléfono</dt><dd>${esc(c.cliente_telefono || '—')}</dd><dt>Correo</dt><dd>${esc(c.cliente_email || '—')}</dd>
-          <dt>Vehículo</dt><dd>${esc(vehiculo || '—')}</dd></dl>
+          <dt>Vehículo</dt><dd>${esc(vehiculo || '—')}</dd><dt>Vendedor</dt><dd>${esc(c.vendedor || '—')}</dd></dl>
         </section>
         <section class="tarjeta"><h2>Enlace seguro para el cliente</h2>
           <p class="muted small">Cualquier persona con este enlace puede ver y descargar <strong>solo esta</strong> cotización. Puede regenerarlo para anular el anterior.</p>
@@ -3260,6 +3287,17 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
           <button class="btn" data-logo>${icono('subir')} Subir logotipo</button>${cfg.logo ? `<button class="btn btn-peligro" data-quitar-logo>Quitar</button>` : ''}</div>
         <p class="small muted">PNG o JPG, idealmente horizontal y con fondo blanco o transparente (máx. 3 MB).</p>
       </section>
+      <section class="tarjeta"><div class="tarjeta-titulo"><h2>Datos bancarios</h2></div>
+        <form id="formBanco" class="rejilla rejilla-2" novalidate>
+          ${campo('banco_nombre', 'Banco', 'placeholder="Ej: Banco Estado"')}
+          ${campo('banco_tipo_cuenta', 'Tipo de cuenta', 'placeholder="Ej: Cuenta corriente"')}
+          ${campo('banco_numero', 'Número de cuenta', 'inputmode="numeric" autocomplete="off"')}
+          ${campo('banco_titular', 'Titular', 'placeholder="Ej: Automotriz JJV SpA"')}
+          ${campo('banco_rut', 'RUT del titular', 'placeholder="76.123.456-7"')}
+          ${campo('banco_email', 'Correo para enviar el comprobante', 'type="email"')}
+        </form>
+        <p class="small muted">Aparecen en el PDF de cada cotización y en el mensaje de WhatsApp. Deje vacío lo que no quiera mostrar.</p>
+      </section>
       <section class="tarjeta"><div class="tarjeta-titulo"><h2>Cotizaciones</h2></div>
         <form id="formCot" class="rejilla rejilla-2" novalidate>
           ${campo('vigencia_dias', 'Vigencia predeterminada (días)', 'inputmode="numeric"')}
@@ -3318,7 +3356,7 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
     vista.addEventListener('click', async (e) => {
       try {
         if (e.target.closest('[data-guardar]')) {
-          const datos = { ...leerFormulario($('#formEmpresa', vista)), ...leerFormulario($('#formCot', vista)) };
+          const datos = { ...leerFormulario($('#formEmpresa', vista)), ...leerFormulario($('#formBanco', vista)), ...leerFormulario($('#formCot', vista)) };
           await App.put('/api/admin/configuracion', datos);
           App.toast('Configuración guardada', 'ok');
           App.repintarDiseno();
@@ -3443,8 +3481,9 @@ function generarPdf(cot, cfg) {
       .fillColor(C.blanco)
       .font('Helvetica')
       .fontSize(9.5)
-      .text(`Fecha de emisión: ${U.fechaCl(cot.fecha)}`, 300, 76, { width: UTIL - 260, align: 'right' })
-      .text(`Válida hasta: ${U.fechaCl(cot.vence)}`, 300, 89, { width: UTIL - 260, align: 'right' });
+      .text(`Fecha de emisión: ${U.fechaCl(cot.fecha)}`, 300, cot.vendedor ? 73 : 76, { width: UTIL - 260, align: 'right' })
+      .text(`Válida hasta: ${U.fechaCl(cot.vence)}`, 300, cot.vendedor ? 85 : 89, { width: UTIL - 260, align: 'right' });
+    if (cot.vendedor) doc.text(`Vendedor: ${cot.vendedor}`, 300, 97, { width: UTIL - 260, align: 'right', height: 12, ellipsis: true, lineBreak: false });
 
     /* ---------------- Datos de la empresa ---------------- */
     let y = 128;
@@ -3617,6 +3656,33 @@ function generarPdf(cot, cfg) {
     };
     seccion('Condiciones comerciales', cot.condiciones);
     seccion('Observaciones', cot.observaciones);
+
+    const filasBanco = [
+      ['Banco', cfg.banco_nombre],
+      ['Tipo de cuenta', cfg.banco_tipo_cuenta],
+      ['N° de cuenta', cfg.banco_numero],
+      ['Titular', cfg.banco_titular],
+      ['RUT', cfg.banco_rut ? U.formatearRut(cfg.banco_rut) : ''],
+      ['Correo', cfg.banco_email],
+    ].filter(([, v]) => v);
+    if (filasBanco.length) {
+      const altoB = 26 + Math.ceil(filasBanco.length / 2) * 15 + 4;
+      if (y + altoB + 10 > LIMITE_INF) {
+        doc.addPage();
+        y = M;
+      }
+      doc.roundedRect(M, y, UTIL, altoB, 6).fill(C.celesteClaro);
+      doc.rect(M, y, 4, altoB).fill(C.celeste);
+      doc.fillColor(C.celeste).font('Helvetica-Bold').fontSize(8.5).text('DATOS PARA TRANSFERENCIA', M + 14, y + 9, { characterSpacing: 1 });
+      const anchoCol = (UTIL - 28) / 2;
+      filasBanco.forEach(([k, v], i) => {
+        const xx = M + 14 + (i % 2) * anchoCol;
+        const yy = y + 24 + Math.floor(i / 2) * 15;
+        doc.fillColor(C.gris).font('Helvetica').fontSize(8.5).text(k, xx, yy, { width: 80 });
+        doc.fillColor(C.texto).font('Helvetica-Bold').fontSize(9).text(String(v), xx + 82, yy, { width: anchoCol - 90, height: 13, ellipsis: true, lineBreak: false });
+      });
+      y += altoB + 16;
+    }
     if (cfg.pie_pdf) seccion('Información adicional', cfg.pie_pdf);
 
     /* ---------------- Pie de página en todas las hojas ---------------- */
